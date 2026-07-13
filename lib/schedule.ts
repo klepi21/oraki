@@ -40,6 +40,21 @@ export function addDays(date: Date, days: number): Date {
   return result;
 }
 
+/** Monday (UTC, midnight) of the week containing `date` — the calendar's week anchor. */
+export function mondayOf(date: Date): Date {
+  const utc = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const diff = (utc.getUTCDay() + 6) % 7; // days since Monday
+  return addDays(utc, -diff);
+}
+
+/** Parses an ISO "YYYY-MM-DD" as a UTC-midnight Date, or returns undefined if malformed. */
+export function parseISODate(isoDate: string | undefined): Date | undefined {
+  if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return undefined;
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
 /** The next date (today or later) whose weekday matches dayOfWeek, as an ISO date. */
 export function nextOccurrenceDate(dayOfWeek: number, fromDate: Date = new Date()): string {
   const from = new Date(Date.UTC(fromDate.getUTCFullYear(), fromDate.getUTCMonth(), fromDate.getUTCDate()));

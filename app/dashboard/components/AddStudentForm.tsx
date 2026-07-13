@@ -75,14 +75,14 @@ export function AddStudentForm() {
         />
       </label>
 
-      <div className="flex gap-3">
-        <label className="flex flex-1 flex-col gap-1 text-sm">
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
           Μέρα μαθήματος
           <select
             name="dayOfWeek"
             required
             defaultValue="1"
-            className="rounded-md border border-cream-dark px-3 py-2 text-base"
+            className="w-full min-w-0 rounded-md border border-cream-dark px-3 py-2 text-base"
           >
             {GREEK_DAY_LABELS.map((label, i) => (
               <option key={i} value={i}>
@@ -92,7 +92,7 @@ export function AddStudentForm() {
           </select>
         </label>
 
-        <label className="flex flex-1 flex-col gap-1 text-sm">
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
           Ώρα
           <TimeSelect name="startTime" defaultValue="16:00" />
         </label>

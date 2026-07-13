@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { GREEK_DAY_LABELS, dayLabel, dateLabel, timeLabel } from "@/lib/greek";
+import { GREEK_DAY_LABELS, dayLabel, dateLabel, timeLabel, weekRangeLabel } from "@/lib/greek";
+import { mondayOf, addDays, toISODate } from "@/lib/schedule";
 import { TimeSelect } from "@/app/components/TimeSelect";
 import { ResponsiveNav, type NavItem } from "@/app/components/ResponsiveNav";
 import { CalendarView } from "@/app/dashboard/components/CalendarView";
@@ -386,6 +387,7 @@ function DashboardTab({
   const [startTime, setStartTime] = useState("16:00");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [addFormOpen, setAddFormOpen] = useState(false);
+  const [weekOffset, setWeekOffset] = useState(0);
 
   function findLesson(slotId: string) {
     for (const student of students) {
@@ -395,15 +397,23 @@ function DashboardTab({
     return null;
   }
 
+  const todayISO = toISODate(new Date());
+  const weekStart = addDays(mondayOf(new Date()), weekOffset * 7);
+  const weekStartISO = toISODate(weekStart);
+  const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekStart, i)));
+
   const calendarEntries: CalendarEntry[] = activeStudents.flatMap((student) =>
     student.slots.map((slot) => ({
       slotId: slot.id,
       studentId: student.id,
       studentName: student.name,
       subject: student.subject,
+      date: weekDates[(slot.dayOfWeek + 6) % 7],
       dayOfWeek: slot.dayOfWeek,
       startTime: slot.startTime,
       durationMinutes: slot.durationMinutes,
+      moved: false,
+      status: "scheduled" as const,
     }))
   );
 
@@ -497,7 +507,19 @@ function DashboardTab({
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-ink">Εβδομαδιαίο πρόγραμμα</h2>
-        <CalendarView entries={calendarEntries} onUpdate={onUpdateSlot} onRemove={onRemoveSlot} />
+        <CalendarView
+          entries={calendarEntries}
+          weekDates={weekDates}
+          weekLabel={weekRangeLabel(weekStartISO)}
+          prevHref="#"
+          nextHref="#"
+          onPrevWeek={() => setWeekOffset((w) => w - 1)}
+          onNextWeek={() => setWeekOffset((w) => w + 1)}
+          todayISO={todayISO}
+          onUpdate={onUpdateSlot}
+          onRemove={onRemoveSlot}
+          onStatusChange={async () => ({ ok: true }) as ActionResult}
+        />
       </section>
 
       <section className="flex flex-col gap-3">

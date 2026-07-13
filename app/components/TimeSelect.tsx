@@ -38,11 +38,10 @@ export function TimeSelect({
     onChange?.(next);
   }
 
-  const selectClass =
-    className ?? "rounded-md border border-slate-300 px-3 py-2 text-base";
+  const selectClass = `${className ?? "rounded-md border border-slate-300 px-3 py-2 text-base"} min-w-0 flex-1`;
 
   return (
-    <div className="flex gap-2">
+    <div className="flex w-full min-w-0 gap-2">
       <select value={hour} onChange={(e) => set(e.target.value, minute)} className={selectClass}>
         {HOURS.map((h) => (
           <option key={h} value={h}>

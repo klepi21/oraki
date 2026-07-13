@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createTutorSupabaseClient } from "@/lib/supabase/server";
 import { ensureTutorRecord } from "@/lib/tutors";
-import { normalizeStudentLabel, appendSlugSuffix, isValidCustomStudentSlug } from "@/lib/slugs";
+import { normalizeStudentLabel, initialsLabel, appendSlugSuffix, isValidCustomStudentSlug } from "@/lib/slugs";
 import { syncStripeSubscriptionForTutor } from "@/lib/stripe/sync";
 
 const addStudentSchema = z.object({
@@ -37,7 +37,7 @@ export async function addStudentAction(formData: FormData): Promise<ActionResult
   const tutor = await ensureTutorRecord();
   const supabase = await createTutorSupabaseClient();
 
-  const label = normalizeStudentLabel(parsed.data.linkLabel || parsed.data.name);
+  const label = parsed.data.linkLabel ? normalizeStudentLabel(parsed.data.linkLabel) : initialsLabel(parsed.data.name);
   const slug = appendSlugSuffix(label);
 
   const { data: student, error: studentError } = await supabase
@@ -228,6 +228,68 @@ export async function updateSlotAction(
 export async function removeSlotAction(slotId: string): Promise<ActionResult> {
   const supabase = await createTutorSupabaseClient();
   const { error } = await supabase.from("slots").update({ active: false }).eq("id", slotId);
+
+  if (error) return { ok: false, error: "Κάτι πήγε στραβά" };
+
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+const LESSON_STATUSES = ["scheduled", "in_progress", "done", "cancelled"] as const;
+export type LessonStatus = (typeof LESSON_STATUSES)[number];
+
+const lessonStatusSchema = z.object({
+  slotId: z.string().uuid(),
+  occurrenceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  durationMinutes: z.coerce.number().int().min(15).max(240),
+  status: z.enum(LESSON_STATUSES),
+});
+
+/**
+ * Records the tutor's status for one concrete calendar occurrence (a
+ * specific date of a recurring slot, or where it moved to via an
+ * exception) — starts implicitly "scheduled", moves through in_progress,
+ * then done or cancelled. "done" is what counts toward the student's
+ * hours-done total.
+ */
+export async function setLessonStatusAction(
+  input: { slotId: string; occurrenceDate: string; durationMinutes: number; status: LessonStatus }
+): Promise<ActionResult> {
+  const parsed = lessonStatusSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Μη έγκυρα στοιχεία" };
+
+  const supabase = await createTutorSupabaseClient();
+  const { error } = await supabase
+    .from("lesson_logs")
+    .upsert(
+      {
+        slot_id: parsed.data.slotId,
+        occurrence_date: parsed.data.occurrenceDate,
+        duration_minutes: parsed.data.durationMinutes,
+        status: parsed.data.status,
+        done_at: parsed.data.status === "done" ? new Date().toISOString() : null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "slot_id,occurrence_date" }
+    );
+
+  if (error) return { ok: false, error: "Κάτι πήγε στραβά" };
+
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+/**
+ * "Paid out" checkpoint: the running hours-done total for this student
+ * starts counting from zero again from now on. History in lesson_logs is
+ * left untouched — only the cutoff moves.
+ */
+export async function resetStudentHoursAction(studentId: string): Promise<ActionResult> {
+  const supabase = await createTutorSupabaseClient();
+  const { error } = await supabase
+    .from("students")
+    .update({ hours_reset_at: new Date().toISOString() })
+    .eq("id", studentId);
 
   if (error) return { ok: false, error: "Κάτι πήγε στραβά" };
 

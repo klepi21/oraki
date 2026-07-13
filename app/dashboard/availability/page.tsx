@@ -25,8 +25,11 @@ export default async function AvailabilityPage() {
 
       <div className="flex flex-col gap-2">
         {(windows ?? []).map((w) => (
-          <div key={w.id} className="flex items-center justify-between rounded-2xl border border-cream-dark p-4">
-            <p className="text-ink-soft">
+          <div
+            key={w.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-cream-dark p-4"
+          >
+            <p className="min-w-0 break-words text-ink-soft">
               {dayLabel(w.day_of_week)}: {timeLabel(w.start_time)}–{timeLabel(w.end_time)}
             </p>
             <RemoveWindowButton windowId={w.id} />

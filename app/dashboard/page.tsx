@@ -2,8 +2,8 @@ import Link from "next/link";
 import { createTutorSupabaseClient } from "@/lib/supabase/server";
 import { ensureTutorRecord } from "@/lib/tutors";
 import { studentLinkPath } from "@/lib/slugs";
-import { dayLabel, dateLabel, timeLabel } from "@/lib/greek";
-import { toISODate } from "@/lib/schedule";
+import { dayLabel, dateLabel, timeLabel, weekRangeLabel, hoursDoneLabel } from "@/lib/greek";
+import { toISODate, mondayOf, parseISODate, addDays, computeOccurrences } from "@/lib/schedule";
 import type { CalendarEntry } from "@/lib/calendar";
 import { Avatar } from "@/app/components/Avatar";
 import { Expandable } from "@/app/components/Expandable";
@@ -16,7 +16,8 @@ import { CustomSlugEditor } from "@/app/dashboard/components/CustomSlugEditor";
 import { RescheduleDecisionButtons } from "@/app/dashboard/components/RescheduleDecisionButtons";
 import { CalendarView } from "@/app/dashboard/components/CalendarView";
 import { AddLessonButton } from "@/app/dashboard/components/AddLessonButton";
-import { updateSlotAction, removeSlotAction } from "@/app/dashboard/actions";
+import { ResetHoursButton } from "@/app/dashboard/components/ResetHoursButton";
+import { updateSlotAction, removeSlotAction, setLessonStatusAction } from "@/app/dashboard/actions";
 
 function relationToOne<T>(value: T | T[] | null): T | undefined {
   return Array.isArray(value) ? value[0] : (value ?? undefined);
@@ -42,13 +43,25 @@ function StatTile({ icon, label, value }: { icon: React.ReactNode; label: string
   );
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ week?: string }>;
+}) {
+  const { week } = await searchParams;
   const tutor = await ensureTutorRecord();
   const supabase = await createTutorSupabaseClient();
 
+  const weekStart = parseISODate(week) ?? mondayOf(new Date());
+  const weekStartISO = toISODate(weekStart);
+  const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekStart, i)));
+  const todayISO = toISODate(new Date());
+
   const { data: students } = await supabase
     .from("students")
-    .select("id, name, subject, active, magic_link_slug, slots(id, day_of_week, start_time, duration_minutes, active)")
+    .select(
+      "id, name, subject, active, magic_link_slug, hours_reset_at, slots(id, day_of_week, start_time, duration_minutes, active)"
+    )
     .eq("tutor_id", tutor.id)
     .order("created_at", { ascending: true });
 
@@ -75,6 +88,31 @@ export default async function DashboardPage() {
           .order("new_date", { ascending: true })
       : { data: [] };
 
+  // All exceptions for these slots (not just upcoming) so a week view can
+  // reflect an occurrence moved in from, or out to, another week.
+  const { data: allExceptions } =
+    activeSlotIds.length > 0
+      ? await supabase
+          .from("lesson_exceptions")
+          .select("original_slot_id, original_date, new_date, new_start_time, new_duration_minutes")
+          .in("original_slot_id", activeSlotIds)
+      : { data: [] };
+
+  const { data: weekLogs } =
+    activeSlotIds.length > 0
+      ? await supabase
+          .from("lesson_logs")
+          .select("slot_id, occurrence_date, status")
+          .in("slot_id", activeSlotIds)
+          .gte("occurrence_date", weekDates[0])
+          .lte("occurrence_date", weekDates[6])
+      : { data: [] };
+
+  const { data: doneLogs } =
+    activeSlotIds.length > 0
+      ? await supabase.from("lesson_logs").select("slot_id, occurrence_date, duration_minutes").eq("status", "done").in("slot_id", activeSlotIds)
+      : { data: [] };
+
   const activeStudents = (students ?? []).filter((s) => s.active);
   const inactiveStudents = (students ?? []).filter((s) => !s.active);
 
@@ -83,19 +121,74 @@ export default async function DashboardPage() {
   const todayDayOfWeek = new Date().getDay();
   const lessonsToday = activeStudents.flatMap((s) => (s.slots ?? []).filter((sl) => sl.active && sl.day_of_week === todayDayOfWeek));
 
-  const calendarEntries: CalendarEntry[] = activeStudents.flatMap((student) =>
+  // slotId -> student, for attaching names/subjects to computed occurrences.
+  const studentBySlotId = new Map<string, { id: string; name: string; subject: string }>();
+  for (const student of activeStudents) {
+    for (const slot of student.slots ?? []) {
+      if (slot.active) studentBySlotId.set(slot.id, { id: student.id, name: student.name, subject: student.subject });
+    }
+  }
+
+  const recurringSlots = activeStudents.flatMap((student) =>
     (student.slots ?? [])
       .filter((slot) => slot.active)
       .map((slot) => ({
-        slotId: slot.id,
-        studentId: student.id,
-        studentName: student.name,
-        subject: student.subject,
+        id: slot.id,
         dayOfWeek: slot.day_of_week,
         startTime: slot.start_time,
         durationMinutes: slot.duration_minutes,
       }))
   );
+
+  const exceptions = (allExceptions ?? []).map((e) => ({
+    originalSlotId: e.original_slot_id,
+    originalDate: e.original_date,
+    newDate: e.new_date,
+    newStartTime: e.new_start_time,
+    newDurationMinutes: e.new_duration_minutes,
+  }));
+
+  const statusByKey = new Map<string, string>();
+  for (const log of weekLogs ?? []) {
+    statusByKey.set(`${log.slot_id}|${log.occurrence_date}`, log.status);
+  }
+
+  const occurrences = computeOccurrences(recurringSlots, exceptions, weekStart, 7);
+
+  const calendarEntries: CalendarEntry[] = occurrences.flatMap((occ) => {
+    const student = studentBySlotId.get(occ.slotId);
+    if (!student) return [];
+    return [
+      {
+        slotId: occ.slotId,
+        studentId: student.id,
+        studentName: student.name,
+        subject: student.subject,
+        date: occ.date,
+        dayOfWeek: new Date(occ.date + "T00:00:00Z").getUTCDay(),
+        startTime: occ.startTime,
+        durationMinutes: occ.durationMinutes,
+        moved: occ.moved,
+        status: (statusByKey.get(`${occ.slotId}|${occ.date}`) as CalendarEntry["status"]) ?? "scheduled",
+      },
+    ];
+  });
+
+  // Hours done per student: sum of "done" lesson_logs, counting only from
+  // the student's own hours_reset_at cutoff forward (if ever reset).
+  const hoursDoneByStudent = new Map<string, number>();
+  const resetAtByStudent = new Map<string, string | null>();
+  for (const student of activeStudents) resetAtByStudent.set(student.id, student.hours_reset_at);
+  for (const log of doneLogs ?? []) {
+    const student = studentBySlotId.get(log.slot_id);
+    if (!student) continue;
+    const resetAt = resetAtByStudent.get(student.id);
+    if (resetAt && log.occurrence_date <= resetAt.slice(0, 10)) continue;
+    hoursDoneByStudent.set(student.id, (hoursDoneByStudent.get(student.id) ?? 0) + log.duration_minutes);
+  }
+
+  const prevWeekISO = toISODate(addDays(weekStart, -7));
+  const nextWeekISO = toISODate(addDays(weekStart, 7));
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-8">
@@ -152,12 +245,12 @@ export default async function DashboardPage() {
 
       {(upcomingExceptions?.length ?? 0) > 0 && (
         <section className="flex flex-col gap-3">
-          <h2 className="text-lg font-semibold text-ink">Προσωρινές αλλαγές</h2>
+          <h2 className="text-lg font-semibold text-ink">Προσωρινές αλλαγές (εγκεκριμένες)</h2>
           {upcomingExceptions!.map((exc) => {
             const slot = relationToOne(exc.slots);
             const student = slot ? relationToOne(slot.students) : undefined;
             return (
-              <div key={exc.id} className="flex items-center gap-3 rounded-2xl border border-accent-soft bg-white p-4">
+              <div key={exc.id} className="flex items-center gap-3 rounded-2xl border-2 border-accent bg-accent-soft p-4">
                 <Avatar name={student?.name ?? "?"} />
                 <div>
                   <p className="text-lg font-semibold text-ink">{student?.name}</p>
@@ -176,7 +269,17 @@ export default async function DashboardPage() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-ink">Εβδομαδιαίο πρόγραμμα</h2>
-        <CalendarView entries={calendarEntries} onUpdate={updateSlotAction} onRemove={removeSlotAction} />
+        <CalendarView
+          entries={calendarEntries}
+          weekDates={weekDates}
+          weekLabel={weekRangeLabel(weekStartISO)}
+          prevHref={`/dashboard?week=${prevWeekISO}`}
+          nextHref={`/dashboard?week=${nextWeekISO}`}
+          todayISO={todayISO}
+          onUpdate={updateSlotAction}
+          onRemove={removeSlotAction}
+          onStatusChange={setLessonStatusAction}
+        />
       </section>
 
       <section className="flex flex-col gap-3">
@@ -187,6 +290,7 @@ export default async function DashboardPage() {
         {activeStudents.map((student) => {
           const link = `${appUrl}${studentLinkPath(tutor.slug, student.magic_link_slug)}`;
           const activeSlots = (student.slots ?? []).filter((sl) => sl.active);
+          const hoursDone = hoursDoneByStudent.get(student.id) ?? 0;
           return (
             <Expandable
               key={student.id}
@@ -203,10 +307,16 @@ export default async function DashboardPage() {
                 </div>
               }
             >
+              <div className="flex items-center gap-2 rounded-xl bg-accent-soft px-3 py-2 text-sm text-accent-dark">
+                <IconClock />
+                <span className="font-semibold">{hoursDoneLabel(hoursDone)}</span>
+                <span className="text-accent-dark/80">ολοκληρωμένες από τον τελευταίο μηδενισμό</span>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <RegenerateLinkButton studentId={student.id} />
                 <AddLessonButton studentId={student.id} />
                 <RemoveStudentButton studentId={student.id} />
+                <ResetHoursButton studentId={student.id} />
               </div>
               <CustomSlugEditor studentId={student.id} currentSlug={student.magic_link_slug} />
             </Expandable>

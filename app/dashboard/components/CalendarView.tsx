@@ -1,98 +1,189 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { GREEK_DAY_LABELS, timeLabel, durationLabel, DURATION_OPTIONS } from "@/lib/greek";
-import { groupEntriesByDay, CALENDAR_DAY_ORDER, type CalendarEntry } from "@/lib/calendar";
+import Link from "next/link";
+import { GREEK_DAY_LABELS, timeLabel, durationLabel, DURATION_OPTIONS, LESSON_STATUS_LABELS } from "@/lib/greek";
+import { groupEntriesByDate, CALENDAR_DAY_ORDER, type CalendarEntry } from "@/lib/calendar";
 import { TimeSelect } from "@/app/components/TimeSelect";
 import { avatarColor } from "@/app/components/Avatar";
-import type { ActionResult } from "@/app/dashboard/actions";
+import type { ActionResult, LessonStatus } from "@/app/dashboard/actions";
 
 type SlotInput = { dayOfWeek: number; startTime: string; durationMinutes: number };
+type StatusInput = { slotId: string; occurrenceDate: string; durationMinutes: number; status: LessonStatus };
 
 const SHORT_DAY_LABELS = ["Κυρ", "Δευ", "Τρί", "Τετ", "Πέμ", "Παρ", "Σάβ"];
+const STATUS_OPTIONS: LessonStatus[] = ["scheduled", "in_progress", "done", "cancelled"];
 
-/** Date-of-month for each weekday of the week containing today (local time). */
-function currentWeekDates(): Record<number, number> {
-  const today = new Date();
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
-  const dates: Record<number, number> = {};
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    dates[d.getDay()] = d.getDate();
+function entryBoxClass(entry: CalendarEntry): string {
+  if (entry.status === "done") return "border-2 border-green-500 bg-green-50";
+  if (entry.status === "cancelled") return "border-2 border-red-300 bg-red-50 opacity-70";
+  if (entry.status === "in_progress") return "border-2 border-blue-400 bg-blue-50";
+  if (entry.moved) return "border-2 border-accent bg-accent-soft";
+  return "border border-cream-dark bg-white";
+}
+
+/** Dates (day-of-month) for each weekday of the displayed week, keyed by ISO date. */
+function weekDatesByIndex(weekDates: string[]): Record<number, { date: string; day: number }> {
+  const out: Record<number, { date: string; day: number }> = {};
+  for (const iso of weekDates) {
+    const [, , d] = iso.split("-").map(Number);
+    const weekday = new Date(iso + "T00:00:00Z").getUTCDay();
+    out[weekday] = { date: iso, day: d };
   }
-  return dates;
+  return out;
 }
 
 export function CalendarView({
   entries,
+  weekDates,
+  weekLabel,
+  prevHref,
+  nextHref,
+  onPrevWeek,
+  onNextWeek,
+  todayISO,
   onUpdate,
   onRemove,
+  onStatusChange,
 }: {
   entries: CalendarEntry[];
+  /** The 7 ISO dates (Monday..Sunday) currently displayed. */
+  weekDates: string[];
+  weekLabel: string;
+  prevHref: string;
+  nextHref: string;
+  /** When set, used instead of navigating prevHref/nextHref (e.g. a client-only demo). */
+  onPrevWeek?: () => void;
+  onNextWeek?: () => void;
+  todayISO: string;
   onUpdate: (slotId: string, input: SlotInput) => Promise<ActionResult>;
   onRemove: (slotId: string) => Promise<ActionResult>;
+  onStatusChange: (input: StatusInput) => Promise<ActionResult>;
 }) {
-  const byDay = groupEntriesByDay(entries);
-  const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
-  const todayDayOfWeek = new Date().getDay();
-  const [selectedDay, setSelectedDay] = useState(todayDayOfWeek);
-  const weekDates = currentWeekDates();
+  const byDate = groupEntriesByDate(entries);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const byIndex = weekDatesByIndex(weekDates);
+  const todayInWeek = weekDates.includes(todayISO);
+  const [selectedDate, setSelectedDate] = useState(todayInWeek ? todayISO : weekDates[0]);
 
-  if (entries.length === 0) {
+  const entryKey = (e: CalendarEntry) => `${e.slotId}|${e.date}`;
+
+  function renderEntry(entry: CalendarEntry) {
+    const key = entryKey(entry);
+    if (editingKey === key) {
+      return (
+        <EditableEntry
+          key={key}
+          entry={entry}
+          onCancel={() => setEditingKey(null)}
+          onSave={async (input) => {
+            const result = await onUpdate(entry.slotId, input);
+            if (result.ok) setEditingKey(null);
+            return result;
+          }}
+          onRemove={async () => {
+            await onRemove(entry.slotId);
+            setEditingKey(null);
+          }}
+        />
+      );
+    }
+
     return (
-      <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-cream-dark bg-white py-10 text-center">
-        <p className="text-sm text-ink-soft">Δεν έχεις ακόμα μαθήματα στο πρόγραμμα.</p>
-        <p className="text-xs text-ink-soft">Πρόσθεσε έναν μαθητή παρακάτω για να ξεκινήσεις.</p>
+      <div
+        key={key}
+        style={{ borderLeftColor: avatarColor(entry.studentName), borderLeftWidth: 3 }}
+        className={`flex flex-col gap-1.5 rounded-xl p-3 text-left shadow-sm ${entryBoxClass(entry)}`}
+      >
+        <button
+          type="button"
+          onClick={() => setEditingKey(key)}
+          className="flex flex-col text-left transition active:scale-[0.98]"
+        >
+          <span className="text-sm font-semibold text-accent-dark">
+            {timeLabel(entry.startTime)}
+            {entry.moved && <span className="ml-1.5 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-semibold text-cream">Νέα ώρα</span>}
+          </span>
+          <span className="text-sm font-medium text-ink">{entry.studentName}</span>
+          <span className="text-xs text-ink-soft">{entry.subject}</span>
+        </button>
+        <select
+          value={entry.status}
+          onChange={(e) =>
+            onStatusChange({
+              slotId: entry.slotId,
+              occurrenceDate: entry.date,
+              durationMinutes: entry.durationMinutes,
+              status: e.target.value as LessonStatus,
+            })
+          }
+          className="rounded-md border border-cream-dark bg-white px-1.5 py-1 text-xs text-ink"
+        >
+          {STATUS_OPTIONS.map((s) => (
+            <option key={s} value={s}>
+              {LESSON_STATUS_LABELS[s]}
+            </option>
+          ))}
+        </select>
       </div>
     );
   }
 
-  function renderEntry(entry: CalendarEntry) {
-    return editingSlotId === entry.slotId ? (
-      <EditableEntry
-        key={entry.slotId}
-        entry={entry}
-        onCancel={() => setEditingSlotId(null)}
-        onSave={async (input) => {
-          const result = await onUpdate(entry.slotId, input);
-          if (result.ok) setEditingSlotId(null);
-          return result;
-        }}
-        onRemove={async () => {
-          await onRemove(entry.slotId);
-          setEditingSlotId(null);
-        }}
-      />
-    ) : (
-      <button
-        key={entry.slotId}
-        onClick={() => setEditingSlotId(entry.slotId)}
-        style={{ borderLeftColor: avatarColor(entry.studentName), borderLeftWidth: 3 }}
-        className="flex flex-col rounded-xl border border-cream-dark bg-white p-3 text-left shadow-sm transition active:scale-[0.98] hover:bg-cream-dark active:bg-cream-dark"
-      >
-        <span className="text-sm font-semibold text-accent-dark">{timeLabel(entry.startTime)}</span>
-        <span className="text-sm font-medium text-ink">{entry.studentName}</span>
-        <span className="text-xs text-ink-soft">{entry.subject}</span>
-      </button>
+  const navButtonClass =
+    "rounded-full border border-cream-dark px-3 py-1.5 text-sm text-ink-soft transition active:scale-95 hover:bg-cream-dark";
+
+  const weekNav = (
+    <div className="flex items-center justify-between">
+      {onPrevWeek ? (
+        <button type="button" onClick={onPrevWeek} className={navButtonClass}>
+          ← Προηγούμενη
+        </button>
+      ) : (
+        <Link href={prevHref} className={navButtonClass}>
+          ← Προηγούμενη
+        </Link>
+      )}
+      <span className="text-sm font-medium text-ink">{weekLabel}</span>
+      {onNextWeek ? (
+        <button type="button" onClick={onNextWeek} className={navButtonClass}>
+          Επόμενη →
+        </button>
+      ) : (
+        <Link href={nextHref} className={navButtonClass}>
+          Επόμενη →
+        </Link>
+      )}
+    </div>
+  );
+
+  if (entries.length === 0) {
+    return (
+      <div className="flex flex-col gap-3">
+        {weekNav}
+        <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-cream-dark bg-white py-10 text-center">
+          <p className="text-sm text-ink-soft">Δεν έχεις μαθήματα αυτή την εβδομάδα.</p>
+        </div>
+      </div>
     );
   }
 
   return (
-    <>
-      {/* Mobile: a day-picker strip + a single day's lessons, so there's
-          no need to scroll past six other days to see today. */}
+    <div className="flex flex-col gap-3">
+      {weekNav}
+
+      {/* Mobile: a day-picker strip + a single day's lessons. */}
       <div className="sm:hidden">
         <div className="flex gap-1.5 overflow-x-auto pb-1">
           {CALENDAR_DAY_ORDER.map((dayIndex) => {
-            const count = byDay[dayIndex].length;
-            const isToday = dayIndex === todayDayOfWeek;
-            const isSelected = dayIndex === selectedDay;
+            const info = byIndex[dayIndex];
+            if (!info) return null;
+            const count = (byDate.get(info.date) ?? []).length;
+            const isToday = info.date === todayISO;
+            const isSelected = info.date === selectedDate;
             return (
               <button
                 key={dayIndex}
-                onClick={() => setSelectedDay(dayIndex)}
+                onClick={() => setSelectedDate(info.date)}
                 className={`flex min-w-11 flex-1 flex-col items-center gap-0.5 rounded-2xl py-2 transition active:scale-95 ${
                   isSelected ? "bg-ink text-cream" : "bg-white text-ink-soft"
                 }`}
@@ -103,7 +194,7 @@ export function CalendarView({
                     isSelected ? "text-cream" : isToday ? "text-accent-dark" : "text-ink"
                   }`}
                 >
-                  {weekDates[dayIndex]}
+                  {info.day}
                 </span>
                 <span
                   className={`h-1 w-1 rounded-full ${
@@ -115,12 +206,12 @@ export function CalendarView({
           })}
         </div>
         <div className="mt-3 flex flex-col gap-2">
-          {byDay[selectedDay].length === 0 ? (
+          {(byDate.get(selectedDate) ?? []).length === 0 ? (
             <p className="rounded-xl border border-dashed border-cream-dark px-3 py-6 text-center text-sm text-ink-soft">
               Χωρίς μάθημα αυτή τη μέρα
             </p>
           ) : (
-            byDay[selectedDay].map(renderEntry)
+            (byDate.get(selectedDate) ?? []).map(renderEntry)
           )}
         </div>
       </div>
@@ -128,8 +219,10 @@ export function CalendarView({
       {/* Desktop: the full week at a glance. */}
       <div className="hidden sm:grid sm:grid-cols-7 sm:gap-3">
         {CALENDAR_DAY_ORDER.map((dayIndex) => {
-          const dayEntries = byDay[dayIndex];
-          const isToday = dayIndex === todayDayOfWeek;
+          const info = byIndex[dayIndex];
+          if (!info) return null;
+          const dayEntries = byDate.get(info.date) ?? [];
+          const isToday = info.date === todayISO;
           if (dayEntries.length === 0 && !isToday) return null;
 
           return (
@@ -139,7 +232,7 @@ export function CalendarView({
                   isToday ? "bg-accent text-cream" : "text-ink-soft"
                 }`}
               >
-                {GREEK_DAY_LABELS[dayIndex]} {weekDates[dayIndex]}
+                {GREEK_DAY_LABELS[dayIndex]} {info.day}
               </h3>
               <div className="flex flex-col gap-2">
                 {dayEntries.map(renderEntry)}
@@ -153,7 +246,7 @@ export function CalendarView({
           );
         })}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -183,6 +276,7 @@ function EditableEntry({
       <p className="text-sm font-medium text-ink">
         {entry.studentName} <span className="font-normal text-ink-soft">— {entry.subject}</span>
       </p>
+      <p className="text-xs text-ink-soft">Αλλαγές εδώ ισχύουν για το επαναλαμβανόμενο μάθημα κάθε εβδομάδα.</p>
       <select
         value={dayOfWeek}
         onChange={(e) => setDayOfWeek(Number(e.target.value))}

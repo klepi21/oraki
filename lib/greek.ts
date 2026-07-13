@@ -33,3 +33,37 @@ export function durationLabel(minutes: number): string {
   if (minutes % 60 === 0) return `${minutes / 60} ώρες`;
   return `${minutes} λεπτά`;
 }
+
+const GREEK_MONTH_SHORT = [
+  "Ιαν", "Φεβ", "Μαρ", "Απρ", "Μάι", "Ιουν", "Ιουλ", "Αυγ", "Σεπ", "Οκτ", "Νοε", "Δεκ",
+];
+
+/** "2026-07-13" (Monday) -> "13–19 Ιουλ 2026", for the weekly schedule header. */
+export function weekRangeLabel(mondayISO: string): string {
+  const [y, m, d] = mondayISO.split("-").map(Number);
+  const monday = new Date(Date.UTC(y, m - 1, d));
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  const startDay = monday.getUTCDate();
+  const endDay = sunday.getUTCDate();
+  const endMonth = GREEK_MONTH_SHORT[sunday.getUTCMonth()];
+  const startMonth = GREEK_MONTH_SHORT[monday.getUTCMonth()];
+  const monthPart = startMonth === endMonth ? endMonth : `${startMonth}–${endMonth}`;
+  return `${startDay}–${endDay} ${monthPart} ${sunday.getUTCFullYear()}`;
+}
+
+export const LESSON_STATUS_LABELS: Record<string, string> = {
+  scheduled: "Προγραμματισμένο",
+  in_progress: "Σε εξέλιξη",
+  done: "Έγινε",
+  cancelled: "Ακυρώθηκε",
+};
+
+/** Total minutes done -> "12,5 ώρες", "45 λεπτά" — same everyday phrasing as durationLabel. */
+export function hoursDoneLabel(totalMinutes: number): string {
+  if (totalMinutes === 0) return "0 ώρες";
+  const hours = totalMinutes / 60;
+  const rounded = Math.round(hours * 2) / 2; // nearest half-hour
+  const formatted = Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1).replace(".", ",");
+  return `${formatted} ${rounded === 1 ? "ώρα" : "ώρες"}`;
+}

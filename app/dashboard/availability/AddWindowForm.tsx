@@ -44,13 +44,13 @@ export function AddWindowForm() {
     >
       <h3 className="text-lg font-semibold text-ink">Πρόσθεσε διαθεσιμότητα</h3>
       <div className="flex flex-col gap-3 sm:flex-row">
-        <label className="flex flex-1 flex-col gap-1 text-sm">
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
           Μέρα
           <select
             name="dayOfWeek"
             required
             defaultValue="1"
-            className="rounded-md border border-cream-dark px-3 py-2 text-base"
+            className="w-full min-w-0 rounded-md border border-cream-dark px-3 py-2 text-base"
           >
             {GREEK_DAY_LABELS.map((label, i) => (
               <option key={i} value={i}>
@@ -59,11 +59,11 @@ export function AddWindowForm() {
             ))}
           </select>
         </label>
-        <label className="flex flex-1 flex-col gap-1 text-sm">
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
           Από
           <TimeSelect name="startTime" defaultValue="15:00" />
         </label>
-        <label className="flex flex-1 flex-col gap-1 text-sm">
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
           Έως
           <TimeSelect name="endTime" defaultValue="21:00" />
         </label>

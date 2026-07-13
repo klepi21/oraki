@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import { resolveStudentBySlug } from "@/lib/students-lookup";
 import { checkStudentLookupRateLimit } from "@/lib/rate-limit";
-import { dayLabel, dateLabel, timeLabel } from "@/lib/greek";
+import { dayLabel, dateLabel, timeLabel, hoursDoneLabel } from "@/lib/greek";
 import { RescheduleForm } from "@/app/[tutorSlug]/[studentSlug]/RescheduleForm";
 
 export const metadata: Metadata = {
@@ -64,6 +64,11 @@ export default async function StudentPage({
             );
           })}
         </ul>
+      </section>
+
+      <section className="rounded-2xl border border-accent bg-accent-soft p-5">
+        <p className="text-sm font-medium text-accent-dark">Ολοκληρωμένες ώρες μαθήματος</p>
+        <p className="mt-1 text-3xl font-bold text-accent-dark">{hoursDoneLabel(student.hoursDoneMinutes)}</p>
       </section>
 
       <RescheduleForm

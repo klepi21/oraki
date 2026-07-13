@@ -11,6 +11,8 @@ export type StudentPublicView = {
   /** This student's own pending reschedule requests — so a parent revisiting
    * the link sees "request sent, waiting" instead of silence. */
   pendingRequests: { originalSlotId: string; newDate: string; newStartTime: string }[];
+  /** Total minutes of lessons marked "done" since the tutor's last hours reset. */
+  hoursDoneMinutes: number;
 };
 
 /**
@@ -31,7 +33,7 @@ export async function resolveStudentBySlug(
 
   const { data: student } = await admin
     .from("students")
-    .select("id, name, subject, tutor_id")
+    .select("id, name, subject, tutor_id, hours_reset_at")
     .eq("tutor_id", tutor.id)
     .eq("magic_link_slug", studentSlug)
     .eq("active", true)
@@ -52,6 +54,18 @@ export async function resolveStudentBySlug(
       .eq("status", "pending"),
   ]);
 
+  const slotIds = (slots ?? []).map((s) => s.id);
+  const { data: doneLogs } =
+    slotIds.length > 0
+      ? await admin.from("lesson_logs").select("occurrence_date, duration_minutes").eq("status", "done").in("slot_id", slotIds)
+      : { data: [] };
+
+  const resetCutoff = student.hours_reset_at?.slice(0, 10);
+  const hoursDoneMinutes = (doneLogs ?? []).reduce((sum, log) => {
+    if (resetCutoff && log.occurrence_date <= resetCutoff) return sum;
+    return sum + log.duration_minutes;
+  }, 0);
+
   return {
     id: student.id,
     name: student.name,
@@ -69,5 +83,6 @@ export async function resolveStudentBySlug(
       newDate: r.new_date,
       newStartTime: r.new_start_time,
     })),
+    hoursDoneMinutes,
   };
 }

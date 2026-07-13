@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { addSlotAction } from "@/app/dashboard/actions";
-import { GREEK_DAY_LABELS } from "@/lib/greek";
+import { GREEK_DAY_LABELS, DURATION_OPTIONS, durationLabel } from "@/lib/greek";
 import { TimeSelect } from "@/app/components/TimeSelect";
 import { IconPlus } from "@/app/components/icons";
 
@@ -10,6 +10,7 @@ export function AddLessonButton({ studentId }: { studentId: string }) {
   const [open, setOpen] = useState(false);
   const [dayOfWeek, setDayOfWeek] = useState(1);
   const [startTime, setStartTime] = useState("16:00");
+  const [durationMinutes, setDurationMinutes] = useState(60);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -42,6 +43,17 @@ export function AddLessonButton({ studentId }: { studentId: string }) {
         </select>
         <TimeSelect value={startTime} onChange={setStartTime} className="rounded-md border border-cream-dark px-2 py-1.5 text-sm" />
       </div>
+      <select
+        value={durationMinutes}
+        onChange={(e) => setDurationMinutes(Number(e.target.value))}
+        className="rounded-md border border-cream-dark px-2 py-1.5 text-sm"
+      >
+        {DURATION_OPTIONS.map((d) => (
+          <option key={d} value={d}>
+            {durationLabel(d)}
+          </option>
+        ))}
+      </select>
       {error && <p className="text-xs text-red-700">{error}</p>}
       <div className="flex gap-2">
         <button
@@ -49,7 +61,7 @@ export function AddLessonButton({ studentId }: { studentId: string }) {
           disabled={isPending}
           onClick={() =>
             startTransition(async () => {
-              const result = await addSlotAction(studentId, { dayOfWeek, startTime, durationMinutes: 60 });
+              const result = await addSlotAction(studentId, { dayOfWeek, startTime, durationMinutes });
               if (result.ok) setOpen(false);
               else setError(result.error);
             })

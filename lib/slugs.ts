@@ -59,6 +59,29 @@ export function normalizeStudentLabel(label: string): string {
   return slugify(label) || "mathitis";
 }
 
+/**
+ * Default link label derived from a student's full name: first two
+ * (transliterated) letters of the first name plus first two of the
+ * surname, e.g. "Μαρία Παπαδοπούλου" -> "mapa". Short and free of the
+ * full name, while still meaningful enough for a tutor skimming a list of
+ * links. Falls back to whatever's available if the name has only one word
+ * or is very short.
+ */
+export function initialsLabel(fullName: string): string {
+  const words = fullName
+    .trim()
+    .split(/\s+/)
+    .map((w) => slugify(w))
+    .filter(Boolean);
+
+  if (words.length === 0) return "mathitis";
+  if (words.length === 1) return words[0].slice(0, 4) || "mathitis";
+
+  const first = words[0].slice(0, 2);
+  const last = words[words.length - 1].slice(0, 2);
+  return `${first}${last}` || "mathitis";
+}
+
 /** Combines a (normalized) label with a fresh random suffix, e.g. for regenerate. */
 export function appendSlugSuffix(normalizedLabel: string): string {
   return `${normalizedLabel}-${generateSlugSuffix()}`;
