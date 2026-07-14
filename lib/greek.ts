@@ -34,6 +34,17 @@ export function durationLabel(minutes: number): string {
   return `${minutes} λεπτά`;
 }
 
+const GREEK_MONTHS_FULL = [
+  "Ιανουάριος", "Φεβρουάριος", "Μάρτιος", "Απρίλιος", "Μάιος", "Ιούνιος",
+  "Ιούλιος", "Αύγουστος", "Σεπτέμβριος", "Οκτώβριος", "Νοέμβριος", "Δεκέμβριος",
+];
+
+/** "2026-07" -> "Ιούλιος 2026", for the monthly schedule header. */
+export function monthLabel(yearMonth: string): string {
+  const [y, m] = yearMonth.split("-").map(Number);
+  return `${GREEK_MONTHS_FULL[m - 1]} ${y}`;
+}
+
 const GREEK_MONTH_SHORT = [
   "Ιαν", "Φεβ", "Μαρ", "Απρ", "Μάι", "Ιουν", "Ιουλ", "Αυγ", "Σεπ", "Οκτ", "Νοε", "Δεκ",
 ];

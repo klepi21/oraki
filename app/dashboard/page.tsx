@@ -2,8 +2,17 @@ import Link from "next/link";
 import { createTutorSupabaseClient } from "@/lib/supabase/server";
 import { ensureTutorRecord } from "@/lib/tutors";
 import { studentLinkPath } from "@/lib/slugs";
-import { dayLabel, dateLabel, timeLabel, weekRangeLabel, hoursDoneLabel } from "@/lib/greek";
-import { toISODate, mondayOf, parseISODate, addDays, computeOccurrences } from "@/lib/schedule";
+import { dayLabel, dateLabel, timeLabel, weekRangeLabel, monthLabel, hoursDoneLabel } from "@/lib/greek";
+import {
+  toISODate,
+  mondayOf,
+  parseISODate,
+  addDays,
+  computeOccurrences,
+  firstOfMonth,
+  addMonths,
+  monthGridRange,
+} from "@/lib/schedule";
 import type { CalendarEntry } from "@/lib/calendar";
 import { Avatar } from "@/app/components/Avatar";
 import { Expandable } from "@/app/components/Expandable";
@@ -15,9 +24,15 @@ import { RemoveStudentButton, ReactivateStudentButton } from "@/app/dashboard/co
 import { CustomSlugEditor } from "@/app/dashboard/components/CustomSlugEditor";
 import { RescheduleDecisionButtons } from "@/app/dashboard/components/RescheduleDecisionButtons";
 import { CalendarView } from "@/app/dashboard/components/CalendarView";
+import { MonthlyCalendarView } from "@/app/dashboard/components/MonthlyCalendarView";
 import { AddLessonButton } from "@/app/dashboard/components/AddLessonButton";
 import { ResetHoursButton } from "@/app/dashboard/components/ResetHoursButton";
-import { updateSlotAction, removeSlotAction, setLessonStatusAction } from "@/app/dashboard/actions";
+import {
+  updateSlotAction,
+  removeSlotAction,
+  setLessonStatusAction,
+  setOccurrenceOverrideAction,
+} from "@/app/dashboard/actions";
 
 function relationToOne<T>(value: T | T[] | null): T | undefined {
   return Array.isArray(value) ? value[0] : (value ?? undefined);
@@ -46,9 +61,10 @@ function StatTile({ icon, label, value }: { icon: React.ReactNode; label: string
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ week?: string }>;
+  searchParams: Promise<{ week?: string; view?: string; month?: string }>;
 }) {
-  const { week } = await searchParams;
+  const { week, view, month } = await searchParams;
+  const isMonthView = view === "month";
   const tutor = await ensureTutorRecord();
   const supabase = await createTutorSupabaseClient();
 
@@ -57,10 +73,19 @@ export default async function DashboardPage({
   const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekStart, i)));
   const todayISO = toISODate(new Date());
 
+  const monthStart = parseISODate(month ? `${month}-01` : undefined) ?? firstOfMonth(new Date());
+  const monthStartISO = monthStart.toISOString().slice(0, 7);
+  const monthGrid = monthGridRange(monthStart);
+  const gridDates = Array.from({ length: monthGrid.days }, (_, i) => toISODate(addDays(monthGrid.start, i)));
+
+  const rangeStart = isMonthView ? monthGrid.start : weekStart;
+  const rangeDays = isMonthView ? monthGrid.days : 7;
+  const rangeDates = isMonthView ? gridDates : weekDates;
+
   const { data: students, error: studentsError } = await supabase
     .from("students")
     .select(
-      "id, name, subject, active, magic_link_slug, hours_reset_at, slots(id, day_of_week, start_time, duration_minutes, active)"
+      "id, name, subject, active, magic_link_slug, hours_reset_at, slots(id, day_of_week, start_time, duration_minutes, one_time_date, active)"
     )
     .eq("tutor_id", tutor.id)
     .order("created_at", { ascending: true });
@@ -105,14 +130,14 @@ export default async function DashboardPage({
           .in("original_slot_id", activeSlotIds)
       : { data: [] };
 
-  const { data: weekLogs } =
+  const { data: rangeLogs } =
     activeSlotIds.length > 0
       ? await supabase
           .from("lesson_logs")
           .select("slot_id, occurrence_date, status")
           .in("slot_id", activeSlotIds)
-          .gte("occurrence_date", weekDates[0])
-          .lte("occurrence_date", weekDates[6])
+          .gte("occurrence_date", rangeDates[0])
+          .lte("occurrence_date", rangeDates[rangeDates.length - 1])
       : { data: [] };
 
   const { data: doneLogs } =
@@ -144,8 +169,12 @@ export default async function DashboardPage({
         dayOfWeek: slot.day_of_week,
         startTime: slot.start_time,
         durationMinutes: slot.duration_minutes,
+        oneTimeDate: slot.one_time_date,
       }))
   );
+
+  const oneTimeDateBySlotId = new Map<string, string | null>();
+  for (const slot of recurringSlots) oneTimeDateBySlotId.set(slot.id, slot.oneTimeDate);
 
   const exceptions = (allExceptions ?? []).map((e) => ({
     originalSlotId: e.original_slot_id,
@@ -156,11 +185,11 @@ export default async function DashboardPage({
   }));
 
   const statusByKey = new Map<string, string>();
-  for (const log of weekLogs ?? []) {
+  for (const log of rangeLogs ?? []) {
     statusByKey.set(`${log.slot_id}|${log.occurrence_date}`, log.status);
   }
 
-  const occurrences = computeOccurrences(recurringSlots, exceptions, weekStart, 7);
+  const occurrences = computeOccurrences(recurringSlots, exceptions, rangeStart, rangeDays);
 
   const calendarEntries: CalendarEntry[] = occurrences.flatMap((occ) => {
     const student = studentBySlotId.get(occ.slotId);
@@ -177,6 +206,7 @@ export default async function DashboardPage({
         durationMinutes: occ.durationMinutes,
         moved: occ.moved,
         status: (statusByKey.get(`${occ.slotId}|${occ.date}`) as CalendarEntry["status"]) ?? "scheduled",
+        oneTimeDate: oneTimeDateBySlotId.get(occ.slotId) ?? null,
       },
     ];
   });
@@ -196,6 +226,8 @@ export default async function DashboardPage({
 
   const prevWeekISO = toISODate(addDays(weekStart, -7));
   const nextWeekISO = toISODate(addDays(weekStart, 7));
+  const prevMonthISO = addMonths(monthStart, -1).toISOString().slice(0, 7);
+  const nextMonthISO = addMonths(monthStart, 1).toISOString().slice(0, 7);
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-8">
@@ -275,18 +307,55 @@ export default async function DashboardPage({
       )}
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold text-ink">Εβδομαδιαίο πρόγραμμα</h2>
-        <CalendarView
-          entries={calendarEntries}
-          weekDates={weekDates}
-          weekLabel={weekRangeLabel(weekStartISO)}
-          prevHref={`/dashboard?week=${prevWeekISO}`}
-          nextHref={`/dashboard?week=${nextWeekISO}`}
-          todayISO={todayISO}
-          onUpdate={updateSlotAction}
-          onRemove={removeSlotAction}
-          onStatusChange={setLessonStatusAction}
-        />
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-ink">Πρόγραμμα</h2>
+          <div className="flex gap-1.5 rounded-full border border-cream-dark bg-white p-1">
+            <Link
+              href="/dashboard?view=week"
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                !isMonthView ? "bg-ink text-cream" : "text-ink-soft hover:bg-cream-dark"
+              }`}
+            >
+              Εβδομαδιαίο
+            </Link>
+            <Link
+              href="/dashboard?view=month"
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                isMonthView ? "bg-ink text-cream" : "text-ink-soft hover:bg-cream-dark"
+              }`}
+            >
+              Μηνιαίο
+            </Link>
+          </div>
+        </div>
+        {isMonthView ? (
+          <MonthlyCalendarView
+            entries={calendarEntries}
+            gridDates={gridDates}
+            monthLabel={monthLabel(monthStartISO)}
+            currentMonth={monthStartISO}
+            prevHref={`/dashboard?view=month&month=${prevMonthISO}`}
+            nextHref={`/dashboard?view=month&month=${nextMonthISO}`}
+            todayISO={todayISO}
+            onUpdateSeries={updateSlotAction}
+            onUpdateSingle={setOccurrenceOverrideAction}
+            onRemove={removeSlotAction}
+            onStatusChange={setLessonStatusAction}
+          />
+        ) : (
+          <CalendarView
+            entries={calendarEntries}
+            weekDates={weekDates}
+            weekLabel={weekRangeLabel(weekStartISO)}
+            prevHref={`/dashboard?week=${prevWeekISO}`}
+            nextHref={`/dashboard?week=${nextWeekISO}`}
+            todayISO={todayISO}
+            onUpdateSeries={updateSlotAction}
+            onUpdateSingle={setOccurrenceOverrideAction}
+            onRemove={removeSlotAction}
+            onStatusChange={setLessonStatusAction}
+          />
+        )}
       </section>
 
       <section className="flex flex-col gap-3">

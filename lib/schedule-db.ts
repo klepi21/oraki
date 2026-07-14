@@ -6,6 +6,7 @@ import {
   type RecurringSlot,
   type LessonException,
   type AvailabilityWindow,
+  type AvailabilityOverride,
   type OpenSlot,
 } from "@/lib/schedule";
 
@@ -14,13 +15,14 @@ const DEFAULT_LOOKAHEAD_DAYS = 14;
 async function fetchTutorScheduleData(tutorId: string) {
   const admin = createAdminSupabaseClient();
 
-  const [{ data: windowRows }, { data: slotRows }] = await Promise.all([
+  const [{ data: windowRows }, { data: slotRows }, { data: overrideRows }] = await Promise.all([
     admin.from("tutor_availability").select("day_of_week, start_time, end_time").eq("tutor_id", tutorId),
     admin
       .from("slots")
-      .select("id, day_of_week, start_time, duration_minutes, students!inner(tutor_id)")
+      .select("id, day_of_week, start_time, duration_minutes, one_time_date, students!inner(tutor_id)")
       .eq("active", true)
       .eq("students.tutor_id", tutorId),
+    admin.from("availability_overrides").select("date, start_time, end_time, is_available").eq("tutor_id", tutorId),
   ]);
 
   const slots: RecurringSlot[] = (slotRows ?? []).map((s) => ({
@@ -28,6 +30,14 @@ async function fetchTutorScheduleData(tutorId: string) {
     dayOfWeek: s.day_of_week,
     startTime: s.start_time,
     durationMinutes: s.duration_minutes,
+    oneTimeDate: s.one_time_date,
+  }));
+
+  const overrides: AvailabilityOverride[] = (overrideRows ?? []).map((o) => ({
+    date: o.date,
+    startTime: o.start_time,
+    endTime: o.end_time,
+    isAvailable: o.is_available,
   }));
 
   const slotIds = slots.map((s) => s.id);
@@ -53,7 +63,7 @@ async function fetchTutorScheduleData(tutorId: string) {
     endTime: w.end_time,
   }));
 
-  return { slots, exceptions, windows };
+  return { slots, exceptions, windows, overrides };
 }
 
 /** All of a tutor's actual dated lessons over the next `days`, exceptions already applied. */
@@ -68,7 +78,7 @@ export async function computeOpenSlotsForTutor(
   durationMinutes: number,
   days = DEFAULT_LOOKAHEAD_DAYS
 ): Promise<OpenSlot[]> {
-  const { slots, exceptions, windows } = await fetchTutorScheduleData(tutorId);
+  const { slots, exceptions, windows, overrides } = await fetchTutorScheduleData(tutorId);
   const bookedOccurrences = computeOccurrences(slots, exceptions, new Date(), days);
-  return computeOpenSlotsForDateRange(windows, bookedOccurrences, durationMinutes, new Date(), days);
+  return computeOpenSlotsForDateRange(windows, bookedOccurrences, durationMinutes, new Date(), days, overrides);
 }

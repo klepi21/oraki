@@ -10,6 +10,8 @@ export type CalendarEntry = {
   /** True if this occurrence was moved here by an approved reschedule. */
   moved: boolean;
   status: "scheduled" | "in_progress" | "done" | "cancelled";
+  /** Set if this slot is a one-off lesson (occurs only on this date, never recurs). */
+  oneTimeDate: string | null;
 };
 
 /** Groups occurrences by ISO date, each day sorted by start time. */

@@ -11,6 +11,7 @@ export function AddStudentForm() {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [repeat, setRepeat] = useState<"weekly" | "once">("weekly");
 
   if (!open) {
     return (
@@ -34,6 +35,7 @@ export function AddStudentForm() {
           const result = await addStudentAction(formData);
           if (result.ok) {
             formRef.current?.reset();
+            setRepeat("weekly");
             setOpen(false);
           } else {
             setError(result.error);
@@ -75,22 +77,47 @@ export function AddStudentForm() {
         />
       </label>
 
+      <label className="flex flex-col gap-1 text-sm">
+        Επανάληψη
+        <select
+          value={repeat}
+          onChange={(e) => setRepeat(e.target.value as "weekly" | "once")}
+          className="w-full min-w-0 rounded-md border border-cream-dark px-3 py-2 text-base"
+        >
+          <option value="weekly">Κάθε εβδομάδα</option>
+          <option value="once">Μία φορά (συγκεκριμένη ημερομηνία)</option>
+        </select>
+      </label>
+
       <div className="flex flex-col gap-3 sm:flex-row">
-        <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
-          Μέρα μαθήματος
-          <select
-            name="dayOfWeek"
-            required
-            defaultValue="1"
-            className="w-full min-w-0 rounded-md border border-cream-dark px-3 py-2 text-base"
-          >
-            {GREEK_DAY_LABELS.map((label, i) => (
-              <option key={i} value={i}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+        {repeat === "weekly" ? (
+          <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
+            Μέρα μαθήματος
+            <select
+              name="dayOfWeek"
+              required
+              defaultValue="1"
+              className="w-full min-w-0 rounded-md border border-cream-dark px-3 py-2 text-base"
+            >
+              {GREEK_DAY_LABELS.map((label, i) => (
+                <option key={i} value={i}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
+            Ημερομηνία
+            <input
+              type="date"
+              name="oneTimeDate"
+              required
+              className="w-full min-w-0 rounded-md border border-cream-dark px-3 py-2 text-base"
+            />
+            <input type="hidden" name="dayOfWeek" value="1" />
+          </label>
+        )}
 
         <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
           Ώρα

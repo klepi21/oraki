@@ -6,6 +6,7 @@ import { createTutorSupabaseClient } from "@/lib/supabase/server";
 import { ensureTutorRecord } from "@/lib/tutors";
 import { normalizeStudentLabel, initialsLabel, appendSlugSuffix, isValidCustomStudentSlug } from "@/lib/slugs";
 import { syncStripeSubscriptionForTutor } from "@/lib/stripe/sync";
+import { weekdayOfISODate } from "@/lib/schedule";
 
 const addStudentSchema = z.object({
   name: z.string().trim().min(1, "Το όνομα είναι υποχρεωτικό").max(100),
@@ -15,6 +16,7 @@ const addStudentSchema = z.object({
   dayOfWeek: z.coerce.number().int().min(0).max(6),
   startTime: z.string().regex(/^\d{2}:\d{2}$/),
   durationMinutes: z.coerce.number().int().min(15).max(240).default(60),
+  oneTimeDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
 });
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -28,6 +30,7 @@ export async function addStudentAction(formData: FormData): Promise<ActionResult
     dayOfWeek: formData.get("dayOfWeek"),
     startTime: formData.get("startTime"),
     durationMinutes: formData.get("durationMinutes") ?? 60,
+    oneTimeDate: formData.get("oneTimeDate") ?? "",
   });
 
   if (!parsed.success) {
@@ -57,11 +60,13 @@ export async function addStudentAction(formData: FormData): Promise<ActionResult
     return { ok: false, error: "Κάτι πήγε στραβά, δοκίμασε ξανά" };
   }
 
+  const oneTimeDate = parsed.data.oneTimeDate || null;
   const { error: slotError } = await supabase.from("slots").insert({
     student_id: student.id,
-    day_of_week: parsed.data.dayOfWeek,
+    day_of_week: oneTimeDate ? weekdayOfISODate(oneTimeDate) : parsed.data.dayOfWeek,
     start_time: parsed.data.startTime,
     duration_minutes: parsed.data.durationMinutes,
+    one_time_date: oneTimeDate,
   });
 
   if (slotError) {
@@ -172,6 +177,8 @@ const slotSchema = z.object({
   dayOfWeek: z.coerce.number().int().min(0).max(6),
   startTime: z.string().regex(/^\d{2}:\d{2}$/),
   durationMinutes: z.coerce.number().int().min(15).max(240),
+  /** When set, this lesson occurs exactly once on this date instead of recurring weekly. */
+  oneTimeDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
 });
 
 /**
@@ -183,7 +190,7 @@ const slotSchema = z.object({
  */
 export async function addSlotAction(
   studentId: string,
-  input: { dayOfWeek: number; startTime: string; durationMinutes: number }
+  input: { dayOfWeek: number; startTime: string; durationMinutes: number; oneTimeDate?: string | null }
 ): Promise<ActionResult> {
   const parsed = slotSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Μη έγκυρα στοιχεία" };
@@ -191,9 +198,10 @@ export async function addSlotAction(
   const supabase = await createTutorSupabaseClient();
   const { error } = await supabase.from("slots").insert({
     student_id: studentId,
-    day_of_week: parsed.data.dayOfWeek,
+    day_of_week: parsed.data.oneTimeDate ? weekdayOfISODate(parsed.data.oneTimeDate) : parsed.data.dayOfWeek,
     start_time: parsed.data.startTime,
     duration_minutes: parsed.data.durationMinutes,
+    one_time_date: parsed.data.oneTimeDate ?? null,
   });
 
   if (error) return { ok: false, error: "Κάτι πήγε στραβά" };
@@ -204,7 +212,7 @@ export async function addSlotAction(
 
 export async function updateSlotAction(
   slotId: string,
-  input: { dayOfWeek: number; startTime: string; durationMinutes: number }
+  input: { dayOfWeek: number; startTime: string; durationMinutes: number; oneTimeDate?: string | null }
 ): Promise<ActionResult> {
   const parsed = slotSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Μη έγκυρα στοιχεία" };
@@ -213,11 +221,51 @@ export async function updateSlotAction(
   const { error } = await supabase
     .from("slots")
     .update({
-      day_of_week: parsed.data.dayOfWeek,
+      day_of_week: parsed.data.oneTimeDate ? weekdayOfISODate(parsed.data.oneTimeDate) : parsed.data.dayOfWeek,
       start_time: parsed.data.startTime,
       duration_minutes: parsed.data.durationMinutes,
+      one_time_date: parsed.data.oneTimeDate ?? null,
     })
     .eq("id", slotId);
+
+  if (error) return { ok: false, error: "Κάτι πήγε στραβά" };
+
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+/**
+ * Changes just ONE calendar occurrence of a recurring slot (time/duration
+ * only, same date) without touching the recurring pattern — the tutor's
+ * direct-edit equivalent of a student reschedule request, minus the
+ * approval step. Mirrors lesson_exceptions' identity key (slot + original
+ * date) so it composes with the student-facing reschedule flow and with
+ * lesson_logs status tracking on the same occurrence.
+ */
+const occurrenceOverrideSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  startTime: z.string().regex(/^\d{2}:\d{2}$/),
+  durationMinutes: z.coerce.number().int().min(15).max(240),
+});
+
+export async function setOccurrenceOverrideAction(
+  slotId: string,
+  input: { date: string; startTime: string; durationMinutes: number }
+): Promise<ActionResult> {
+  const parsed = occurrenceOverrideSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Μη έγκυρα στοιχεία" };
+
+  const supabase = await createTutorSupabaseClient();
+  const { error } = await supabase.from("lesson_exceptions").upsert(
+    {
+      original_slot_id: slotId,
+      original_date: parsed.data.date,
+      new_date: parsed.data.date,
+      new_start_time: parsed.data.startTime,
+      new_duration_minutes: parsed.data.durationMinutes,
+    },
+    { onConflict: "original_slot_id,original_date" }
+  );
 
   if (error) return { ok: false, error: "Κάτι πήγε στραβά" };
 

@@ -13,6 +13,7 @@ function entry(overrides: Partial<CalendarEntry>): CalendarEntry {
     durationMinutes: 60,
     moved: false,
     status: "scheduled",
+    oneTimeDate: null,
     ...overrides,
   };
 }

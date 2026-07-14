@@ -1,14 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { GREEK_DAY_LABELS, timeLabel, durationLabel, DURATION_OPTIONS, LESSON_STATUS_LABELS } from "@/lib/greek";
+import { timeLabel, GREEK_DAY_LABELS, LESSON_STATUS_LABELS } from "@/lib/greek";
 import { groupEntriesByDate, CALENDAR_DAY_ORDER, type CalendarEntry } from "@/lib/calendar";
-import { TimeSelect } from "@/app/components/TimeSelect";
 import { avatarColor } from "@/app/components/Avatar";
+import { EditableEntry, type SeriesInput, type SingleInput } from "@/app/dashboard/components/EditableEntry";
 import type { ActionResult, LessonStatus } from "@/app/dashboard/actions";
 
-type SlotInput = { dayOfWeek: number; startTime: string; durationMinutes: number };
 type StatusInput = { slotId: string; occurrenceDate: string; durationMinutes: number; status: LessonStatus };
 
 const SHORT_DAY_LABELS = ["Κυρ", "Δευ", "Τρί", "Τετ", "Πέμ", "Παρ", "Σάβ"];
@@ -42,7 +41,8 @@ export function CalendarView({
   onPrevWeek,
   onNextWeek,
   todayISO,
-  onUpdate,
+  onUpdateSeries,
+  onUpdateSingle,
   onRemove,
   onStatusChange,
 }: {
@@ -56,7 +56,8 @@ export function CalendarView({
   onPrevWeek?: () => void;
   onNextWeek?: () => void;
   todayISO: string;
-  onUpdate: (slotId: string, input: SlotInput) => Promise<ActionResult>;
+  onUpdateSeries: (slotId: string, input: SeriesInput) => Promise<ActionResult>;
+  onUpdateSingle: (slotId: string, input: SingleInput) => Promise<ActionResult>;
   onRemove: (slotId: string) => Promise<ActionResult>;
   onStatusChange: (input: StatusInput) => Promise<ActionResult>;
 }) {
@@ -76,8 +77,13 @@ export function CalendarView({
           key={key}
           entry={entry}
           onCancel={() => setEditingKey(null)}
-          onSave={async (input) => {
-            const result = await onUpdate(entry.slotId, input);
+          onSaveSeries={async (input) => {
+            const result = await onUpdateSeries(entry.slotId, input);
+            if (result.ok) setEditingKey(null);
+            return result;
+          }}
+          onSaveSingle={async (input) => {
+            const result = await onUpdateSingle(entry.slotId, input);
             if (result.ok) setEditingKey(null);
             return result;
           }}
@@ -103,6 +109,7 @@ export function CalendarView({
           <span className="text-sm font-semibold text-accent-dark">
             {timeLabel(entry.startTime)}
             {entry.moved && <span className="ml-1.5 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-semibold text-cream">Νέα ώρα</span>}
+            {entry.oneTimeDate && <span className="ml-1.5 rounded-full bg-ink px-1.5 py-0.5 text-[10px] font-semibold text-cream">Μία φορά</span>}
           </span>
           <span className="text-sm font-medium text-ink">{entry.studentName}</span>
           <span className="text-xs text-ink-soft">{entry.subject}</span>
@@ -245,92 +252,6 @@ export function CalendarView({
             </div>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-function EditableEntry({
-  entry,
-  onSave,
-  onCancel,
-  onRemove,
-}: {
-  entry: CalendarEntry;
-  onSave: (input: SlotInput) => Promise<ActionResult>;
-  onCancel: () => void;
-  onRemove: () => Promise<void>;
-}) {
-  const [dayOfWeek, setDayOfWeek] = useState(entry.dayOfWeek);
-  const [startTime, setStartTime] = useState(entry.startTime.slice(0, 5));
-  const [durationMinutes, setDurationMinutes] = useState(entry.durationMinutes);
-  const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-
-  const durationChoices = DURATION_OPTIONS.includes(durationMinutes as (typeof DURATION_OPTIONS)[number])
-    ? [...DURATION_OPTIONS]
-    : [...DURATION_OPTIONS, durationMinutes].sort((a, b) => a - b);
-
-  return (
-    <div className="flex flex-col gap-2 rounded-xl border border-accent bg-white p-3">
-      <p className="text-sm font-medium text-ink">
-        {entry.studentName} <span className="font-normal text-ink-soft">— {entry.subject}</span>
-      </p>
-      <p className="text-xs text-ink-soft">Αλλαγές εδώ ισχύουν για το επαναλαμβανόμενο μάθημα κάθε εβδομάδα.</p>
-      <select
-        value={dayOfWeek}
-        onChange={(e) => setDayOfWeek(Number(e.target.value))}
-        className="rounded-md border border-cream-dark px-2 py-1.5 text-sm"
-      >
-        {GREEK_DAY_LABELS.map((label, i) => (
-          <option key={i} value={i}>
-            {label}
-          </option>
-        ))}
-      </select>
-      <TimeSelect
-        value={startTime}
-        onChange={setStartTime}
-        className="rounded-md border border-cream-dark px-2 py-1.5 text-sm"
-      />
-      <select
-        value={durationMinutes}
-        onChange={(e) => setDurationMinutes(Number(e.target.value))}
-        className="rounded-md border border-cream-dark px-2 py-1.5 text-sm"
-      >
-        {durationChoices.map((d) => (
-          <option key={d} value={d}>
-            {durationLabel(d)}
-          </option>
-        ))}
-      </select>
-      {error && <p className="text-xs text-red-700">{error}</p>}
-      <div className="flex flex-wrap gap-2">
-        <button
-          disabled={isPending}
-          onClick={() =>
-            startTransition(async () => {
-              const result = await onSave({ dayOfWeek, startTime, durationMinutes });
-              if (!result.ok) setError(result.error);
-            })
-          }
-          className="rounded-full bg-ink px-3 py-1.5 text-xs font-semibold text-cream transition active:scale-[0.98] hover:opacity-90 active:opacity-80 disabled:opacity-50"
-        >
-          Αποθήκευση
-        </button>
-        <button
-          onClick={onCancel}
-          className="rounded-full border border-cream-dark px-3 py-1.5 text-xs font-medium text-ink-soft transition active:scale-[0.98] hover:bg-cream-dark active:bg-cream-dark"
-        >
-          Άκυρο
-        </button>
-        <button
-          disabled={isPending}
-          onClick={() => startTransition(onRemove)}
-          className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 transition active:scale-[0.98] hover:bg-red-50 active:bg-red-50"
-        >
-          Διαγραφή
-        </button>
       </div>
     </div>
   );

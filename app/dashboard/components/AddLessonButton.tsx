@@ -8,7 +8,9 @@ import { IconPlus } from "@/app/components/icons";
 
 export function AddLessonButton({ studentId }: { studentId: string }) {
   const [open, setOpen] = useState(false);
+  const [repeat, setRepeat] = useState<"weekly" | "once">("weekly");
   const [dayOfWeek, setDayOfWeek] = useState(1);
+  const [oneTimeDate, setOneTimeDate] = useState("");
   const [startTime, setStartTime] = useState("16:00");
   const [durationMinutes, setDurationMinutes] = useState(60);
   const [error, setError] = useState<string | null>(null);
@@ -29,18 +31,36 @@ export function AddLessonButton({ studentId }: { studentId: string }) {
 
   return (
     <div className="flex w-full flex-col gap-2 rounded-md border border-cream-dark p-3">
+      <select
+        value={repeat}
+        onChange={(e) => setRepeat(e.target.value as "weekly" | "once")}
+        className="rounded-md border border-cream-dark px-2 py-1.5 text-sm"
+      >
+        <option value="weekly">Κάθε εβδομάδα</option>
+        <option value="once">Μία φορά (συγκεκριμένη ημερομηνία)</option>
+      </select>
       <div className="flex gap-2">
-        <select
-          value={dayOfWeek}
-          onChange={(e) => setDayOfWeek(Number(e.target.value))}
-          className="flex-1 rounded-md border border-cream-dark px-2 py-1.5 text-sm"
-        >
-          {GREEK_DAY_LABELS.map((label, i) => (
-            <option key={i} value={i}>
-              {label}
-            </option>
-          ))}
-        </select>
+        {repeat === "weekly" ? (
+          <select
+            value={dayOfWeek}
+            onChange={(e) => setDayOfWeek(Number(e.target.value))}
+            className="flex-1 rounded-md border border-cream-dark px-2 py-1.5 text-sm"
+          >
+            {GREEK_DAY_LABELS.map((label, i) => (
+              <option key={i} value={i}>
+                {label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type="date"
+            value={oneTimeDate}
+            onChange={(e) => setOneTimeDate(e.target.value)}
+            required
+            className="flex-1 rounded-md border border-cream-dark px-2 py-1.5 text-sm"
+          />
+        )}
         <TimeSelect value={startTime} onChange={setStartTime} className="rounded-md border border-cream-dark px-2 py-1.5 text-sm" />
       </div>
       <select
@@ -59,13 +79,22 @@ export function AddLessonButton({ studentId }: { studentId: string }) {
         <button
           type="button"
           disabled={isPending}
-          onClick={() =>
+          onClick={() => {
+            if (repeat === "once" && !oneTimeDate) {
+              setError("Διάλεξε ημερομηνία");
+              return;
+            }
             startTransition(async () => {
-              const result = await addSlotAction(studentId, { dayOfWeek, startTime, durationMinutes });
+              const result = await addSlotAction(studentId, {
+                dayOfWeek,
+                startTime,
+                durationMinutes,
+                oneTimeDate: repeat === "once" ? oneTimeDate : null,
+              });
               if (result.ok) setOpen(false);
               else setError(result.error);
-            })
-          }
+            });
+          }}
           className="rounded-full bg-ink px-3 py-2 text-sm font-semibold text-cream hover:opacity-90 active:opacity-80 disabled:opacity-50"
         >
           Προσθήκη

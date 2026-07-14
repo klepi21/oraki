@@ -251,6 +251,25 @@ export function PreviewApp() {
     return { ok: true };
   }
 
+  // No exceptions modeled in this client-only demo — "just this occurrence"
+  // falls back to changing the time/duration for the whole mock slot.
+  async function updateOccurrence(
+    slotId: string,
+    input: { date: string; startTime: string; durationMinutes: number }
+  ): Promise<ActionResult> {
+    setStudents((prev) =>
+      prev.map((s) => ({
+        ...s,
+        slots: s.slots.map((slot) =>
+          slot.id === slotId
+            ? { ...slot, startTime: input.startTime, durationMinutes: input.durationMinutes }
+            : slot
+        ),
+      }))
+    );
+    return { ok: true };
+  }
+
   async function removeSlot(slotId: string): Promise<ActionResult> {
     setStudents((prev) => prev.map((s) => ({ ...s, slots: s.slots.filter((slot) => slot.id !== slotId) })));
     return { ok: true };
@@ -312,6 +331,7 @@ export function PreviewApp() {
             onSetCustomSlug={setCustomSlug}
             onAddSlot={addSlot}
             onUpdateSlot={updateSlot}
+            onUpdateOccurrence={updateOccurrence}
             onRemoveSlot={removeSlot}
             hasAvailability={availability.length > 0}
             onGoToAvailability={() => setTab("availability")}
@@ -358,6 +378,7 @@ function DashboardTab({
   onSetCustomSlug,
   onAddSlot,
   onUpdateSlot,
+  onUpdateOccurrence,
   onRemoveSlot,
   hasAvailability,
   onGoToAvailability,
@@ -376,6 +397,7 @@ function DashboardTab({
   onSetCustomSlug: (id: string, newSlug: string) => { ok: true } | { ok: false; error: string };
   onAddSlot: (studentId: string, input: { dayOfWeek: number; startTime: string; durationMinutes: number }) => Promise<ActionResult>;
   onUpdateSlot: (slotId: string, input: { dayOfWeek: number; startTime: string; durationMinutes: number }) => Promise<ActionResult>;
+  onUpdateOccurrence: (slotId: string, input: { date: string; startTime: string; durationMinutes: number }) => Promise<ActionResult>;
   onRemoveSlot: (slotId: string) => Promise<ActionResult>;
   hasAvailability: boolean;
   onGoToAvailability: () => void;
@@ -414,6 +436,7 @@ function DashboardTab({
       durationMinutes: slot.durationMinutes,
       moved: false,
       status: "scheduled" as const,
+      oneTimeDate: null,
     }))
   );
 
@@ -516,7 +539,8 @@ function DashboardTab({
           onPrevWeek={() => setWeekOffset((w) => w - 1)}
           onNextWeek={() => setWeekOffset((w) => w + 1)}
           todayISO={todayISO}
-          onUpdate={onUpdateSlot}
+          onUpdateSeries={onUpdateSlot}
+          onUpdateSingle={onUpdateOccurrence}
           onRemove={onRemoveSlot}
           onStatusChange={async () => ({ ok: true }) as ActionResult}
         />
