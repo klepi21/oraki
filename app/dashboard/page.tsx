@@ -57,13 +57,20 @@ export default async function DashboardPage({
   const weekDates = Array.from({ length: 7 }, (_, i) => toISODate(addDays(weekStart, i)));
   const todayISO = toISODate(new Date());
 
-  const { data: students } = await supabase
+  const { data: students, error: studentsError } = await supabase
     .from("students")
     .select(
       "id, name, subject, active, magic_link_slug, hours_reset_at, slots(id, day_of_week, start_time, duration_minutes, active)"
     )
     .eq("tutor_id", tutor.id)
     .order("created_at", { ascending: true });
+
+  if (studentsError) {
+    // Most likely cause: migration 0007 (hours_reset_at / lesson_logs) hasn't
+    // been applied to this Supabase project yet, so this select 42703s and
+    // the whole dashboard would otherwise render as if there were no students.
+    console.error("dashboard: failed to load students", studentsError);
+  }
 
   const { data: pendingRequests } = await supabase
     .from("reschedule_requests")
