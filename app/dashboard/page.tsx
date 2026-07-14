@@ -27,6 +27,7 @@ import { CalendarView } from "@/app/dashboard/components/CalendarView";
 import { MonthlyCalendarView } from "@/app/dashboard/components/MonthlyCalendarView";
 import { AddLessonButton } from "@/app/dashboard/components/AddLessonButton";
 import { ResetHoursButton } from "@/app/dashboard/components/ResetHoursButton";
+import { DashboardOnboarding } from "@/app/dashboard/components/DashboardOnboarding";
 import {
   updateSlotAction,
   removeSlotAction,
@@ -231,6 +232,7 @@ export default async function DashboardPage({
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-8">
+      <DashboardOnboarding />
       <section>
         <h1 className="text-2xl font-bold tracking-tight text-ink">Γεια σου, {tutor.name.split(" ")[0]}</h1>
         <p className="mt-1 text-sm text-ink-soft">Να τι συμβαίνει στο πρόγραμμά σου αυτή τη στιγμή.</p>
