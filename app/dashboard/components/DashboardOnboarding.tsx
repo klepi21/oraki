@@ -12,7 +12,7 @@ import {
 
 const STORAGE_KEY = "oraki_dashboard_onboarding_seen_v1";
 
-const STEPS: { icon: React.ReactNode; title: string; body: string }[] = [
+const STEPS: { icon: React.ReactNode; title: string; body: string; note?: string }[] = [
   {
     icon: <IconUsers />,
     title: "Πρόσθεσε μαθητές",
@@ -47,7 +47,9 @@ const STEPS: { icon: React.ReactNode; title: string; body: string }[] = [
     icon: <IconPencil />,
     title: "Ο δικός σου σύνδεσμος",
     body:
-      "Στις «Ρυθμίσεις» μπορείς να αλλάξεις το δικό σου δημόσιο link (oraki.gr/το-όνομά-σου) — αυτό που βλέπουν όλοι οι μαθητές σου.",
+      "Στις «Ρυθμίσεις» μπορείς να αλλάξεις το δικό σου δημόσιο link — αυτό που βλέπουν όλοι οι μαθητές σου.",
+    note:
+      "Σημείωση: για λόγους ιδιωτικότητας και ασφάλειας προτίμησε κάτι μη αναγνωρίσιμο αντί για το όνομά σου — κάτι σύντομο, π.χ. «math».",
   },
 ];
 
@@ -104,6 +106,11 @@ export function DashboardOnboarding() {
               <div>
                 <p className="font-semibold text-ink">{step.title}</p>
                 <p className="mt-0.5 text-sm text-ink-soft">{step.body}</p>
+                {step.note && (
+                  <p className="mt-2 rounded-lg bg-accent-soft px-2.5 py-1.5 text-xs text-accent-dark">
+                    {step.note}
+                  </p>
+                )}
               </div>
             </div>
           ))}
